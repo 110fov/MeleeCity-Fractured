@@ -298,8 +298,9 @@ function hg.GenerateLoot(ply,ent,func)
 					AmmoCount = math.random(hg.ammoents[ammo].Count or 30)
 				end
 			else
-				local tbl = hg.ammotypeshuy[string.Replace(entName, "ent_ammo_", "")]
-				AmmoCount = math.random(tbl and hg.ammoents[tbl.name] and hg.ammoents[tbl.name].Count or 30)
+				local ammoID = string.Replace(entName, "ent_ammo_", "")
+				local ammoent = hg.ammoents[ammoID]
+				AmmoCount = math.random(ammoent and ammoent.Count or 30)
 			end
 		elseif entName == "*attachments*" then
 			local tbl = table.GetKeys(table.Random(hg.validattachments))

@@ -723,6 +723,16 @@ MODE.LootTable = {
 		--{7,"ent_armor_vest6"},
 		{5,"ent_armor_vest7"},
 		{8, "ent_armor_helmet2"},
+
+		{16,"ent_ammo_.45rubber"},
+		{11,"ent_ammo_9x18mm"},
+		{10,"ent_ammo_9x19mmparabellum"},
+		{8,"ent_ammo_.45acp"},
+		{8,"ent_ammo_.38special"},
+		{8,"ent_ammo_.40sw"},
+		{7,"ent_ammo_.50actionexpress"},
+		{6,"ent_ammo_12/70gauge"},
+
 		-- Добавил это так как банально через время верхний тир падает РЕЖЕ в раз сто чем этот.
 		{0.3,"weapon_smallconsumable"},
 		{0.25,"weapon_bigconsumable"},
@@ -773,6 +783,15 @@ MODE.LootTable = {
 		--{1,"weapon_akm"},
 		{1,"weapon_vpo136"},
 		{1,"weapon_sr25"},
+
+		{6,"ent_ammo_12/70gauge"},
+		{5,"ent_ammo_9x19mmparabellum"},
+		{5,"ent_ammo_7.65x17mm"},
+		{4,"ent_ammo_5.56x45mm"},
+		{4,"ent_ammo_7.62x39mm"},
+		{4,"ent_ammo_7.62x51mm"},
+		{3,"ent_ammo_4.6x30mm"},
+		{2,"ent_ammo_5.45x39mm"},
 	}},
 	{2, {
 		{1, "weapon_fury13"}

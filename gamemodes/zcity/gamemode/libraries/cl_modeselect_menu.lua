@@ -591,13 +591,13 @@ if CLIENT then
             OpenQueueManager()
         end
 
-        local statsBtn = BigButton("Player Criminal Records", COL_ROW, COL_ROW_HOV)
+        local statsBtn = BigButton("Player Database", COL_ROW, COL_ROW_HOV)
         statsBtn.DoClick = function()
             surface.PlaySound(SND_CLICK)
             if CRIMXP and CRIMXP.OpenAdminStats then
                 CRIMXP.OpenAdminStats()
             else
-                chat.AddText(Color(255, 80, 80), "Criminal records menu is not available.")
+                chat.AddText(Color(255, 80, 80), "Database menu is not available.")
             end
         end
 

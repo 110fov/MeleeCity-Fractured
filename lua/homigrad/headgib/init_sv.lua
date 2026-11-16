@@ -130,7 +130,7 @@ util.PrecacheModel(headboom_mdl)
 for _, snd in ipairs(sounds) do
 	util.PrecacheSound(snd)
 end
-function Gib_Input(rag, bone, force)
+function Gib_Input(rag, bone, force, quiet)
 	if not IsValid(rag) then return end
 	
 	local gibRemove = rag.gibRemove
@@ -150,22 +150,29 @@ function Gib_Input(rag, bone, force)
 		--sound.Emit(rag,"physics/flesh/flesh_squishy_impact_hard" .. math.random(2, 4) .. ".wav")
 		--sound.Emit(rag,"physics/body/body_medium_break3.wav")
 		--sound.Emit(rag,"physics/glass/glass_sheet_step" .. math.random(1,4) .. ".wav", 90, 50, 2)
-		rag:EmitSound(sounds[math.random(#sounds)], 70, math.random(95, 105), 2)
+		if not quiet then
+			rag:EmitSound(sounds[math.random(#sounds)], 70, math.random(95, 105), 2)
+		end
 
 		Gib_RemoveBone(rag, bone, phys_bone)
 		
 		--rag:ManipulateBoneScale(rag:LookupBone("ValveBiped.Bip01_Neck1"),vecZero)
 		rag:ManipulateBonePosition(rag:LookupBone("ValveBiped.Bip01_Neck1"),Vector(-1,0,0))
 
-		local ent = ents_Create("prop_dynamic")
-		ent:SetModel(headboom_mdl)
 		local att = rag:GetAttachment(3)
 		local pos, ang = LocalToWorld(ThatPlyIsFemale(rag) and headpos_female or headpos_male, headang, att.Pos, att.Ang)
-		ent:SetPos(pos)
-		ent:SetAngles(ang)
-		--ent:AddEffects(EF_FOLLOWBONE)
-		ent:SetParent(rag, 3)--rag:LookupBone("ValveBiped.Bip01_Head1"))
-		ent:Spawn()
+
+		-- quiet = decapitation without the explosion sound/model (used by hg_funbantest sniper shot)
+		local ent = rag
+		if not quiet then
+			ent = ents_Create("prop_dynamic")
+			ent:SetModel(headboom_mdl)
+			ent:SetPos(pos)
+			ent:SetAngles(ang)
+			--ent:AddEffects(EF_FOLLOWBONE)
+			ent:SetParent(rag, 3)--rag:LookupBone("ValveBiped.Bip01_Head1"))
+			ent:Spawn()
+		end
 
 		SpawnMeatGore(ent, pos, nil, force) --модельки поменять и будет эпик
 

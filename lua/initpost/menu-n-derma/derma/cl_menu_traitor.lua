@@ -150,7 +150,10 @@ local RoleConfigs = {
         maxPoints = 30,
         convar = "hmcd_traitor_loadout",
         saveFile = "zcity_traitor_loadout.txt",
-        presetFile = "zcity_traitor_presets.txt",
+        defaultLoadout = {
+            skillset = "none",
+            weapons = {"weapon_mp-80", "weapon_buck200knife"}
+        },
         skillsets = {
             ["none"] = {cost = 0, name = "None", desc = "You spent time collecting supplies and weapons instead of building a real specialty."},
             ["infiltrator"] = {cost = 15, name = "Infiltrator", desc = "Break necks and disguise as victims."},
@@ -159,6 +162,8 @@ local RoleConfigs = {
             ["chemist"] = {cost = 10, name = "Chemist", desc = "Detect chemicals in the air."}
         },
         items = {
+            ["weapon_mp-80"] = {cost = 2, name = "MP-80-13T", desc = "Non-lethal .45 Rubber pistol. Free starter weapon."},
+            ["weapon_tranquilizer"] = {cost = 5, name = "Tranquilizer Gun", desc = "Non-lethal dart gun that puts targets to sleep."},
             ["weapon_p22"] = {cost = 6, name = "Walther P22"},
             ["weapon_taser"] = {cost = 6, name = "Taser"},
             ["weapon_buck200knife"] = {cost = 2, name = "Buck 200 Knife"},
@@ -188,66 +193,6 @@ local RoleConfigs = {
         exclusions = {
             ["weapon_buck200knife"] = {["weapon_sogknife"] = true},
             ["weapon_sogknife"] = {["weapon_buck200knife"] = true}
-        },
-        defaultPresets = {
-            {
-                name = "Legacy",
-                loadout = {
-                    skillset = "none",
-                    weapons = {
-                        "weapon_p22",
-                        "weapon_p22_silencer",
-                        "weapon_buck200knife",
-                        "weapon_hg_rgd_tpik",
-                        "weapon_adrenaline",
-                        "weapon_hg_shuriken",
-                        "weapon_hg_smokenade_tpik",
-                        "weapon_traitor_ied",
-                        "weapon_traitor_poison1",
-                        "weapon_traitor_suit",
-                        "weapon_hg_jam",
-                        "weapon_walkie_talkie"
-                    }
-                }
-            },
-            {
-                name = "Infiltrator",
-                loadout = {
-                    skillset = "infiltrator",
-                    weapons = {
-                        "weapon_sogknife",
-                        "weapon_adrenaline",
-                        "weapon_hg_smokenade_tpik"
-                    }
-                }
-            },
-            {
-                name = "Assassin",
-                loadout = {
-                    skillset = "assassin",
-                    weapons = {
-                        "weapon_p22",
-                        "weapon_p22_silencer",
-                        "weapon_sogknife",
-                        "weapon_adrenaline"
-                    }
-                }
-            },
-            {
-                name = "Chemist",
-                loadout = {
-                    skillset = "chemist",
-                    weapons = {
-                        "weapon_sogknife",
-                        "weapon_adrenaline",
-                        "weapon_traitor_poison1",
-                        "weapon_traitor_poison2",
-                        "weapon_traitor_poison3",
-                        "weapon_traitor_poison4",
-                        "weapon_traitor_poison_consumable"
-                    }
-                }
-            }
         }
     },
     hero = {
@@ -257,6 +202,9 @@ local RoleConfigs = {
         convar = "hmcd_hero_loadout",
         saveFile = "zcity_hero_loadout.txt",
         presetFile = "zcity_hero_presets.txt",
+        defaultLoadout = {
+            weapons = {"weapon_px4beretta"}
+        },
         items = {
             ["weapon_px4beretta"] = {cost = 4, name = "Beretta PX4", desc = "Reliable sidearm with room for ammo or a suppressor."},
             ["weapon_glock17"] = {cost = 5, name = "Glock 17", desc = "Flexible pistol with strong attachment options."},
@@ -384,6 +332,28 @@ do
     end
 end
 
+if CRIMXP and CRIMXP.Loadouts then
+    for roleId, roleConfig in pairs(RoleConfigs) do
+        local catalog = CRIMXP.Loadouts[roleId]
+        if catalog then
+            roleConfig.maxPoints = catalog.maxPoints or roleConfig.maxPoints
+            roleConfig.exclusions = catalog.exclusions or roleConfig.exclusions
+
+            for _, group in ipairs({"items", "addons", "skillsets"}) do
+                for id, entry in pairs(catalog[group] or {}) do
+                    local info = roleConfig[group] and roleConfig[group][id]
+                    if info then
+                        info.cost = entry.points
+                        info.price = entry.price
+                        info.free = entry.free
+                        info.requiredLevel = entry.requiredLevel or 1
+                    end
+                end
+            end
+        end
+    end
+end
+
 local function IsArmorItem(id)
     return isstring(id) and string.StartWith(id, "ent_armor_")
 end
@@ -448,10 +418,26 @@ local function ReadSavedLoadout(config)
             return parsed
         end
     end
+    if config.defaultLoadout then return table.Copy(config.defaultLoadout) end
     return {}
 end
 
-local function SanitizeLoadout(config, rawLoadout)
+local function IsUnlockedItem(id, info)
+    if info and info.free then return true end
+    return CRIMXP and CRIMXP.IsUnlocked and CRIMXP.IsUnlocked(id) or false
+end
+
+local function GetItemPrice(info)
+    if info.free then return 0 end
+    return math.floor(tonumber(info.price) or (tonumber(info.cost) or 0) * 1000)
+end
+
+local function FormatMoney(amount)
+    amount = math.floor(tonumber(amount) or 0)
+    return "$" .. (string.Comma and string.Comma(amount) or tostring(amount))
+end
+
+local function SanitizeLoadout(config, rawLoadout, enforceOwnership)
     local normalizedLoadout = {weapons = {}}
     if config.skillsets then
         normalizedLoadout.skillset = "none"
@@ -462,7 +448,10 @@ local function SanitizeLoadout(config, rawLoadout)
     end
 
     if config.skillsets and type(rawLoadout.skillset) == "string" and config.skillsets[rawLoadout.skillset] then
-        normalizedLoadout.skillset = rawLoadout.skillset
+        local skillset = config.skillsets[rawLoadout.skillset]
+        if not enforceOwnership or IsUnlockedItem(rawLoadout.skillset, skillset) then
+            normalizedLoadout.skillset = rawLoadout.skillset
+        end
     end
 
     local totalPoints = 0
@@ -491,7 +480,7 @@ local function SanitizeLoadout(config, rawLoadout)
     usedWeapons = {}
     for _, weaponId in ipairs(rawWeaponIds) do
         local baseInfo = config.items[weaponId]
-        if baseInfo and not usedWeapons[weaponId] and not HasWeaponConflict(config, normalizedLoadout.weapons, weaponId) then
+        if baseInfo and (not enforceOwnership or IsUnlockedItem(weaponId, baseInfo)) and not usedWeapons[weaponId] and not HasWeaponConflict(config, normalizedLoadout.weapons, weaponId) then
             local weaponCost = baseInfo.cost
             if totalPoints + weaponCost <= config.maxPoints then
                 usedWeapons[weaponId] = true
@@ -503,12 +492,26 @@ local function SanitizeLoadout(config, rawLoadout)
 
     for _, weaponId in ipairs(rawWeaponIds) do
         local addonInfo = config.addons[weaponId]
-        if addonInfo and not usedWeapons[weaponId] and usedWeapons[addonInfo.parent] then
+        if addonInfo and (not enforceOwnership or IsUnlockedItem(weaponId, addonInfo)) and not usedWeapons[weaponId] and usedWeapons[addonInfo.parent] then
             local weaponCost = addonInfo.cost
             if totalPoints + weaponCost <= config.maxPoints then
                 usedWeapons[weaponId] = true
                 table.insert(normalizedLoadout.weapons, weaponId)
                 totalPoints = totalPoints + weaponCost
+            end
+        end
+    end
+
+    if #normalizedLoadout.weapons == 0 and normalizedLoadout.skillset == "none" and config.defaultLoadout then
+        for _, weaponId in ipairs(config.defaultLoadout.weapons or {}) do
+            local baseInfo = config.items[weaponId]
+            if baseInfo and (not enforceOwnership or IsUnlockedItem(weaponId, baseInfo)) and not usedWeapons[weaponId] and not HasWeaponConflict(config, normalizedLoadout.weapons, weaponId) then
+                local weaponCost = baseInfo.cost
+                if totalPoints + weaponCost <= config.maxPoints then
+                    usedWeapons[weaponId] = true
+                    table.insert(normalizedLoadout.weapons, weaponId)
+                    totalPoints = totalPoints + weaponCost
+                end
             end
         end
     end
@@ -616,6 +619,7 @@ local function OpenRoleEditor(parentPanel, roleId, returnPanel)
 
     local config = RoleConfigs[roleId]
     local state = RoleState[roleId]
+    local earlyUnlockFrame
 
     editorPanel:SetAlpha(0)
     editorPanel.Paint = function(self, w, h)
@@ -750,154 +754,177 @@ local function OpenRoleEditor(parentPanel, roleId, returnPanel)
     clearBtn.Think = ThinkAnimatedLabel
     clearBtn.Paint = PaintAnimatedLabel
 
-    local presetsScroll = vgui.Create("DScrollPanel", sidebar)
-    presetsScroll:Dock(FILL)
-    local sbar = presetsScroll:GetVBar()
-    sbar:SetHideButtons(true)
-    function sbar:Paint(w, h)
-        draw.RoundedBox(0, 0, 0, w, h, Color(0, 0, 0, 80))
-    end
-    function sbar.btnGrip:Paint(w, h)
-        draw.RoundedBox(0, 0, 0, w, h, Color(100, 100, 100, 150))
-    end
-
-    local function LoadUserPresets()
-        local data = file.Read(config.presetFile, "DATA")
-        if data then
-            return util.JSONToTable(data) or {}
+    if config.presetFile then
+        local presetsScroll = vgui.Create("DScrollPanel", sidebar)
+        presetsScroll:Dock(FILL)
+        local sbar = presetsScroll:GetVBar()
+        sbar:SetHideButtons(true)
+        function sbar:Paint(w, h)
+            draw.RoundedBox(0, 0, 0, w, h, Color(0, 0, 0, 80))
         end
-        return {}
-    end
+        function sbar.btnGrip:Paint(w, h)
+            draw.RoundedBox(0, 0, 0, w, h, Color(100, 100, 100, 150))
+        end
 
-    local function SaveUserPresets(presets)
-        file.Write(config.presetFile, util.TableToJSON(presets))
-    end
+        local function LoadUserPresets()
+            local data = file.Read(config.presetFile, "DATA")
+            if data then
+                return util.JSONToTable(data) or {}
+            end
+            return {}
+        end
 
-    local function RefreshPresetsUI()
-        presetsScroll:Clear()
+        local function SaveUserPresets(presets)
+            file.Write(config.presetFile, util.TableToJSON(presets))
+        end
 
-        local lblTitlePresets = vgui.Create("DLabel", presetsScroll)
-        lblTitlePresets:Dock(TOP)
-        lblTitlePresets:SetText("DEFAULT PRESETS")
-        lblTitlePresets:SetFont(TRAITOR_MENU_FONT)
-        lblTitlePresets:SetTextColor(Color(255, 255, 255, 150))
-        lblTitlePresets:SetContentAlignment(5)
-        lblTitlePresets:SizeToContentsY()
-        lblTitlePresets:DockMargin(0, MenuUnit(10), 0, MenuUnit(5))
+        local function RefreshPresetsUI()
+            presetsScroll:Clear()
 
-        for _, preset in ipairs(config.defaultPresets or {}) do
-            local btn = vgui.Create("DButton", presetsScroll)
-            btn:Dock(TOP)
-            btn:SetTall(MenuUnit(TRAITOR_PRESET_BUTTON_HEIGHT))
-            btn:DockMargin(MenuUnit(5), 0, MenuUnit(5), MenuUnit(2))
-            btn:SetText(preset.name)
-            btn:SetFont(TRAITOR_MENU_FONT)
-            btn:SetTextColor(Color(200, 255, 200))
-            btn.Paint = function(s, w, h)
-                local bgColor = s:IsHovered() and Color(50, 80, 50, 150) or Color(30, 30, 30, 150)
+            local lblTitlePresets = vgui.Create("DLabel", presetsScroll)
+            lblTitlePresets:Dock(TOP)
+            lblTitlePresets:SetText("DEFAULT PRESETS")
+            lblTitlePresets:SetFont(TRAITOR_MENU_FONT)
+            lblTitlePresets:SetTextColor(Color(255, 255, 255, 150))
+            lblTitlePresets:SetContentAlignment(5)
+            lblTitlePresets:SizeToContentsY()
+            lblTitlePresets:DockMargin(0, MenuUnit(10), 0, MenuUnit(5))
+
+            for _, preset in ipairs(config.defaultPresets or {}) do
+                local btn = vgui.Create("DButton", presetsScroll)
+                btn:Dock(TOP)
+                btn:SetTall(MenuUnit(TRAITOR_PRESET_BUTTON_HEIGHT))
+                btn:DockMargin(MenuUnit(5), 0, MenuUnit(5), MenuUnit(2))
+                btn:SetText(preset.name)
+                btn:SetFont(TRAITOR_MENU_FONT)
+                btn:SetTextColor(Color(200, 255, 200))
+                btn.Paint = function(s, w, h)
+                    local bgColor = s:IsHovered() and Color(50, 80, 50, 150) or Color(30, 30, 30, 150)
+                    draw.RoundedBox(0, 0, 0, w, h, bgColor)
+                    surface.SetDrawColor(200, 200, 200, 50)
+                    surface.DrawOutlinedRect(0, 0, w, h)
+                end
+                btn.DoClick = function()
+                    state.loadout = SanitizeLoadout(config, table.Copy(preset.loadout or {}), CRIMXP and CRIMXP.UnlocksReady)
+                    SaveLoadout(roleId)
+                    UpdateUI()
+                    surface.PlaySound(SOUND_MENU_SELECT)
+                end
+            end
+
+            local lblCustomPresets = vgui.Create("DLabel", presetsScroll)
+            lblCustomPresets:Dock(TOP)
+            lblCustomPresets:SetText("CUSTOM PRESETS")
+            lblCustomPresets:SetFont(TRAITOR_MENU_FONT)
+            lblCustomPresets:SetTextColor(Color(255, 255, 255, 150))
+            lblCustomPresets:SetContentAlignment(5)
+            lblCustomPresets:SizeToContentsY()
+            lblCustomPresets:DockMargin(0, MenuUnit(10), 0, MenuUnit(5))
+
+            local userPresets = LoadUserPresets()
+            local btnCreate = vgui.Create("DButton", presetsScroll)
+            btnCreate:Dock(TOP)
+            btnCreate:SetTall(MenuUnit(TRAITOR_PRESET_BUTTON_HEIGHT))
+            btnCreate:DockMargin(MenuUnit(5), 0, MenuUnit(5), MenuUnit(5))
+            btnCreate:SetText("+ SAVE CURRENT AS PRESET")
+            btnCreate:SetFont(TRAITOR_MENU_FONT)
+            btnCreate:SetTextColor(Color(255, 255, 255))
+            btnCreate.Paint = function(s, w, h)
+                local bgColor = s:IsHovered() and Color(100, 100, 100, 150) or Color(30, 30, 30, 150)
                 draw.RoundedBox(0, 0, 0, w, h, bgColor)
                 surface.SetDrawColor(200, 200, 200, 50)
                 surface.DrawOutlinedRect(0, 0, w, h)
             end
-            btn.DoClick = function()
-                state.loadout = SanitizeLoadout(config, table.Copy(preset.loadout or {}))
-                SaveLoadout(roleId)
-                UpdateUI()
-                surface.PlaySound(SOUND_MENU_SELECT)
-            end
-        end
-
-        local lblCustomPresets = vgui.Create("DLabel", presetsScroll)
-        lblCustomPresets:Dock(TOP)
-        lblCustomPresets:SetText("CUSTOM PRESETS")
-        lblCustomPresets:SetFont(TRAITOR_MENU_FONT)
-        lblCustomPresets:SetTextColor(Color(255, 255, 255, 150))
-        lblCustomPresets:SetContentAlignment(5)
-        lblCustomPresets:SizeToContentsY()
-        lblCustomPresets:DockMargin(0, MenuUnit(10), 0, MenuUnit(5))
-
-        local userPresets = LoadUserPresets()
-        local btnCreate = vgui.Create("DButton", presetsScroll)
-        btnCreate:Dock(TOP)
-        btnCreate:SetTall(MenuUnit(TRAITOR_PRESET_BUTTON_HEIGHT))
-        btnCreate:DockMargin(MenuUnit(5), 0, MenuUnit(5), MenuUnit(5))
-        btnCreate:SetText("+ SAVE CURRENT AS PRESET")
-        btnCreate:SetFont(TRAITOR_MENU_FONT)
-        btnCreate:SetTextColor(Color(255, 255, 255))
-        btnCreate.Paint = function(s, w, h)
-            local bgColor = s:IsHovered() and Color(100, 100, 100, 150) or Color(30, 30, 30, 150)
-            draw.RoundedBox(0, 0, 0, w, h, bgColor)
-            surface.SetDrawColor(200, 200, 200, 50)
-            surface.DrawOutlinedRect(0, 0, w, h)
-        end
-        btnCreate.DoClick = function()
-            Derma_StringRequest("New Preset", "Enter a name for the new preset:", "Custom Preset " .. (#userPresets + 1), function(text)
-                table.insert(userPresets, {name = text, loadout = table.Copy(state.loadout)})
-                SaveUserPresets(userPresets)
-                RefreshPresetsUI()
-                surface.PlaySound(SOUND_MENU_SELECT)
-            end)
-        end
-
-        for i, preset in ipairs(userPresets) do
-            local pnl = vgui.Create("DPanel", presetsScroll)
-            pnl:Dock(TOP)
-            pnl:SetTall(MenuUnit(TRAITOR_PRESET_BUTTON_HEIGHT))
-            pnl:DockMargin(MenuUnit(5), 0, MenuUnit(5), MenuUnit(2))
-            pnl.Paint = function(s, w, h)
-                draw.RoundedBox(0, 0, 0, w, h, Color(30, 30, 30, 150))
-                surface.SetDrawColor(200, 200, 200, 50)
-                surface.DrawOutlinedRect(0, 0, w, h)
+            btnCreate.DoClick = function()
+                Derma_StringRequest("New Preset", "Enter a name for the new preset:", "Custom Preset " .. (#userPresets + 1), function(text)
+                    table.insert(userPresets, {name = text, loadout = table.Copy(state.loadout)})
+                    SaveUserPresets(userPresets)
+                    RefreshPresetsUI()
+                    surface.PlaySound(SOUND_MENU_SELECT)
+                end)
             end
 
-            local lblName = vgui.Create("DLabel", pnl)
-            lblName:Dock(LEFT)
-            lblName:DockMargin(MenuUnit(5), 0, 0, 0)
-            lblName:SetText(preset.name)
-            lblName:SetFont(TRAITOR_MENU_FONT)
-            lblName:SetTextColor(Color(255, 255, 255))
-            lblName:SizeToContentsX()
+            for i, preset in ipairs(userPresets) do
+                local pnl = vgui.Create("DPanel", presetsScroll)
+                pnl:Dock(TOP)
+                pnl:SetTall(MenuUnit(TRAITOR_PRESET_BUTTON_HEIGHT))
+                pnl:DockMargin(MenuUnit(5), 0, MenuUnit(5), MenuUnit(2))
+                pnl.Paint = function(s, w, h)
+                    draw.RoundedBox(0, 0, 0, w, h, Color(30, 30, 30, 150))
+                    surface.SetDrawColor(200, 200, 200, 50)
+                    surface.DrawOutlinedRect(0, 0, w, h)
+                end
 
-            local btnDelete = vgui.Create("DButton", pnl)
-            btnDelete:Dock(RIGHT)
-            btnDelete:SetWide(MenuUnit(30))
-            btnDelete:SetText("X")
-            btnDelete:SetFont(TRAITOR_MENU_FONT)
-            btnDelete:SetTextColor(Color(255, 100, 100))
-            btnDelete.Paint = function(s, w, h)
-                if s:IsHovered() then
-                    draw.RoundedBox(0, 0, 0, w, h, Color(255, 0, 0, 50))
+                local lblName = vgui.Create("DLabel", pnl)
+                lblName:Dock(LEFT)
+                lblName:DockMargin(MenuUnit(5), 0, 0, 0)
+                lblName:SetText(preset.name)
+                lblName:SetFont(TRAITOR_MENU_FONT)
+                lblName:SetTextColor(Color(255, 255, 255))
+                lblName:SizeToContentsX()
+
+                local btnDelete = vgui.Create("DButton", pnl)
+                btnDelete:Dock(RIGHT)
+                btnDelete:SetWide(MenuUnit(30))
+                btnDelete:SetText("X")
+                btnDelete:SetFont(TRAITOR_MENU_FONT)
+                btnDelete:SetTextColor(Color(255, 100, 100))
+                btnDelete.Paint = function(s, w, h)
+                    if s:IsHovered() then
+                        draw.RoundedBox(0, 0, 0, w, h, Color(255, 0, 0, 50))
+                    end
+                end
+                btnDelete.DoClick = function()
+                    table.remove(userPresets, i)
+                    SaveUserPresets(userPresets)
+                    RefreshPresetsUI()
+                    surface.PlaySound(SOUND_MENU_SELECT)
+                end
+
+                local btnLoad = vgui.Create("DButton", pnl)
+                btnLoad:Dock(RIGHT)
+                btnLoad:SetText("LOAD")
+                btnLoad:SetFont(TRAITOR_MENU_FONT)
+                btnLoad:SetTextColor(Color(200, 255, 200))
+                btnLoad:SizeToContentsX()
+                btnLoad:SetWide(btnLoad:GetWide() + MenuUnit(10))
+                btnLoad.Paint = function(s, w, h)
+                    if s:IsHovered() then
+                        draw.RoundedBox(0, 0, 0, w, h, Color(0, 255, 0, 50))
+                    end
+                end
+                btnLoad.DoClick = function()
+                    state.loadout = SanitizeLoadout(config, table.Copy(preset.loadout or {}), CRIMXP and CRIMXP.UnlocksReady)
+                    SaveLoadout(roleId)
+                    UpdateUI()
+                    surface.PlaySound(SOUND_MENU_SELECT)
                 end
             end
-            btnDelete.DoClick = function()
-                table.remove(userPresets, i)
-                SaveUserPresets(userPresets)
-                RefreshPresetsUI()
-                surface.PlaySound(SOUND_MENU_SELECT)
-            end
-
-            local btnLoad = vgui.Create("DButton", pnl)
-            btnLoad:Dock(RIGHT)
-            btnLoad:SetText("LOAD")
-            btnLoad:SetFont(TRAITOR_MENU_FONT)
-            btnLoad:SetTextColor(Color(200, 255, 200))
-            btnLoad:SizeToContentsX()
-            btnLoad:SetWide(btnLoad:GetWide() + MenuUnit(10))
-            btnLoad.Paint = function(s, w, h)
-                if s:IsHovered() then
-                    draw.RoundedBox(0, 0, 0, w, h, Color(0, 255, 0, 50))
-                end
-            end
-            btnLoad.DoClick = function()
-                state.loadout = SanitizeLoadout(config, table.Copy(preset.loadout or {}))
-                SaveLoadout(roleId)
-                UpdateUI()
-                surface.PlaySound(SOUND_MENU_SELECT)
-            end
         end
+
+        RefreshPresetsUI()
+    else
+        local unlockInfo = vgui.Create("DPanel", sidebar)
+        unlockInfo:Dock(FILL)
+        unlockInfo:DockMargin(MenuUnit(15), MenuUnit(10), MenuUnit(15), MenuUnit(10))
+        unlockInfo.Paint = function() end
+
+        local unlockTitle = vgui.Create("DLabel", unlockInfo)
+        unlockTitle:Dock(TOP)
+        unlockTitle:SetFont(TRAITOR_MENU_FONT)
+        unlockTitle:SetTextColor(Color(255, 255, 255, 180))
+        unlockTitle:SetText("PERMANENT UNLOCKS")
+        unlockTitle:SizeToContentsY()
+
+        local unlockHint = vgui.Create("DLabel", unlockInfo)
+        unlockHint:Dock(TOP)
+        unlockHint:DockMargin(0, MenuUnit(8), 0, 0)
+        unlockHint:SetFont(TRAITOR_MENU_FONT)
+        unlockHint:SetTextColor(Color(190, 190, 190))
+        unlockHint:SetWrap(true)
+        unlockHint:SetText("Buy an item once with Fracture$ to unlock it forever. Points still limit what you can equip each round.")
+        unlockHint:SizeToContentsY()
     end
-
-    RefreshPresetsUI()
 
     local contentPanel = vgui.Create("DPanel", editorPanel)
     contentPanel:SetPos(sidebarWidth, 0)
@@ -1019,7 +1046,7 @@ local function OpenRoleEditor(parentPanel, roleId, returnPanel)
         if isSkill then
             local info = config.skillsets[id]
             if info then
-                lblPreviewName:SetText(info.name .. " (" .. info.cost .. " pts)")
+                lblPreviewName:SetText(info.name .. " (" .. info.cost .. " pts, " .. (info.free and "FREE" or FormatMoney(GetItemPrice(info))) .. ")")
                 lblPreviewDesc:SetText(info.desc or "")
             end
             return
@@ -1028,7 +1055,7 @@ local function OpenRoleEditor(parentPanel, roleId, returnPanel)
         local info = config.items[id] or config.addons[id]
         if not info then return end
 
-        lblPreviewName:SetText(info.name .. " (" .. info.cost .. " pts)")
+        lblPreviewName:SetText(info.name .. " (" .. info.cost .. " pts, " .. (info.free and "FREE" or FormatMoney(GetItemPrice(info))) .. ")")
 
         local desc = info.desc or "No description available."
         local swep = weapons.GetStored(id)
@@ -1057,12 +1084,159 @@ local function OpenRoleEditor(parentPanel, roleId, returnPanel)
         lblPreviewDesc:SetText(desc)
     end
 
+    local function GetAccessState(id, info, isSelected)
+        if isSelected then return "EQUIPPED", Color(100, 255, 100) end
+        if IsUnlockedItem(id, info) then return "OWNED", Color(150, 200, 255) end
+
+        local price = GetItemPrice(info)
+        local ply = LocalPlayer()
+        local level = IsValid(ply) and ply:GetCrimeLevel() or 1
+        local requiredLevel = tonumber(info.requiredLevel) or 1
+        if level < requiredLevel then return "LVL " .. requiredLevel, Color(255, 120, 120) end
+
+        local balance = IsValid(ply) and ply:GetFracture() or 0
+        if balance >= price then return "BUY " .. FormatMoney(price), Color(255, 220, 100) end
+        return "NEED " .. FormatMoney(price), Color(255, 120, 120)
+    end
+
+    local function CloseEarlyUnlock()
+        if IsValid(earlyUnlockFrame) then
+            earlyUnlockFrame:Remove()
+        end
+        earlyUnlockFrame = nil
+    end
+
+    local function OpenEarlyUnlock(id, info)
+        CloseEarlyUnlock()
+
+        local requiredLevel = tonumber(info.requiredLevel) or 1
+        local earlyPrice = math.floor(GetItemPrice(info) * 4)
+
+        local frame = vgui.Create("DFrame")
+        earlyUnlockFrame = frame
+        frame:SetSize(MenuUnit(430), MenuUnit(260))
+        frame:Center()
+        frame:SetTitle("")
+        frame:ShowCloseButton(false)
+        frame:SetDraggable(false)
+        frame:MakePopup()
+        frame:SetDeleteOnClose(true)
+        frame.Paint = function(panel, w, h)
+            draw.RoundedBox(0, 0, 0, w, h, Color(10, 10, 19, 245))
+            surface.SetDrawColor(200, 200, 200, 80)
+            surface.DrawOutlinedRect(0, 0, w, h)
+        end
+        frame.OnRemove = function()
+            if earlyUnlockFrame == frame then earlyUnlockFrame = nil end
+        end
+
+        local body = vgui.Create("DPanel", frame)
+        body:Dock(FILL)
+        body:DockPadding(MenuUnit(18), MenuUnit(18), MenuUnit(18), MenuUnit(18))
+        body.Paint = function() end
+
+        local title = vgui.Create("DLabel", body)
+        title:Dock(TOP)
+        title:SetFont(TRAITOR_POINTS_FONT)
+        title:SetTextColor(Color(255, 255, 255))
+        title:SetContentAlignment(5)
+        title:SetText("UNLOCK EARLY?")
+        title:SizeToContentsY()
+
+        local name = vgui.Create("DLabel", body)
+        name:Dock(TOP)
+        name:DockMargin(0, MenuUnit(12), 0, 0)
+        name:SetFont(TRAITOR_MENU_FONT)
+        name:SetTextColor(Color(220, 220, 220))
+        name:SetContentAlignment(5)
+        name:SetText(info.name or id)
+        name:SizeToContentsY()
+
+        local req = vgui.Create("DLabel", body)
+        req:Dock(TOP)
+        req:DockMargin(0, MenuUnit(12), 0, 0)
+        req:SetFont(TRAITOR_MENU_FONT)
+        req:SetTextColor(Color(255, 120, 120))
+        req:SetContentAlignment(5)
+        req:SetText("REQUIRES LEVEL " .. requiredLevel)
+        req:SizeToContentsY()
+
+        local price = vgui.Create("DLabel", body)
+        price:Dock(TOP)
+        price:DockMargin(0, MenuUnit(8), 0, 0)
+        price:SetFont(TRAITOR_POINTS_FONT)
+        price:SetTextColor(Color(255, 220, 100))
+        price:SetContentAlignment(5)
+        price:SetText("PRICE " .. FormatMoney(earlyPrice))
+        price:SizeToContentsY()
+
+        local buttons = vgui.Create("DPanel", body)
+        buttons:Dock(BOTTOM)
+        buttons:SetTall(MenuUnit(TRAITOR_LIST_BUTTON_HEIGHT))
+        buttons.Paint = function() end
+
+        local no = vgui.Create("DButton", buttons)
+        no:Dock(RIGHT)
+        no:SetWide(MenuUnit(110))
+        no:SetText("NO")
+        no:SetFont(TRAITOR_MENU_FONT)
+        no:SetTextColor(Color(255, 255, 255))
+        no.Paint = function(panel, w, h)
+            draw.RoundedBox(0, 0, 0, w, h, panel:IsHovered() and Color(70, 70, 70, 220) or Color(35, 35, 35, 220))
+            surface.SetDrawColor(200, 200, 200, 70)
+            surface.DrawOutlinedRect(0, 0, w, h)
+        end
+        no.DoClick = function()
+            surface.PlaySound(SOUND_SETTINGS_CLICK)
+            CloseEarlyUnlock()
+        end
+
+        local yes = vgui.Create("DButton", buttons)
+        yes:Dock(RIGHT)
+        yes:DockMargin(0, 0, MenuUnit(8), 0)
+        yes:SetWide(MenuUnit(110))
+        yes:SetText("YES")
+        yes:SetFont(TRAITOR_MENU_FONT)
+        yes:SetTextColor(Color(255, 220, 100))
+        yes.Paint = function(panel, w, h)
+            draw.RoundedBox(0, 0, 0, w, h, panel:IsHovered() and Color(80, 70, 35, 230) or Color(40, 35, 20, 230))
+            surface.SetDrawColor(255, 220, 100, 90)
+            surface.DrawOutlinedRect(0, 0, w, h)
+        end
+        yes.DoClick = function()
+            if not IsValid(LocalPlayer()) then return end
+            surface.PlaySound(SOUND_SETTINGS_CLICK)
+            CRIMXP.RequestPurchase(id, true)
+            CloseEarlyUnlock()
+        end
+    end
+
+    local function TryBuy(id, info)
+        if IsUnlockedItem(id, info) then return false end
+
+        local ply = LocalPlayer()
+        local level = IsValid(ply) and ply:GetCrimeLevel() or 1
+        local requiredLevel = tonumber(info.requiredLevel) or 1
+        if level < requiredLevel then
+            OpenEarlyUnlock(id, info)
+            surface.PlaySound(SOUND_SETTINGS_CLICK)
+            return true
+        end
+
+        if CRIMXP and CRIMXP.RequestPurchase then
+            CRIMXP.RequestPurchase(id)
+            surface.PlaySound(SOUND_SETTINGS_CLICK)
+        end
+        return true
+    end
+
     UpdateUI = function()
         loadoutScroll:Clear()
-        state.loadout = SanitizeLoadout(config, state.loadout)
+        state.loadout = SanitizeLoadout(config, state.loadout, CRIMXP and CRIMXP.UnlocksReady)
 
         local currentPoints = GetLoadoutPoints(config, state.loadout)
-        lblPoints:SetText("POINTS: " .. currentPoints .. " / " .. config.maxPoints)
+        local balance = IsValid(LocalPlayer()) and LocalPlayer():GetFracture() or 0
+        lblPoints:SetText("POINTS: " .. currentPoints .. " / " .. config.maxPoints .. "   |   F$: " .. FormatMoney(balance))
         lblPoints:SetTextColor(Color(255, 255, 255))
 
         local function AddCategory(title)
@@ -1094,14 +1268,15 @@ local function OpenRoleEditor(parentPanel, roleId, returnPanel)
                     surface.SetDrawColor(200, 200, 200, 50)
                     surface.DrawOutlinedRect(0, 0, w, h)
                     draw.SimpleText(info.name .. " (" .. info.cost .. " pts)", TRAITOR_MENU_FONT, MenuUnit(10), h / 2, Color(255, 255, 255), TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
-                    if isSelected then
-                        draw.SimpleText("EQUIPPED", TRAITOR_MENU_FONT, w - MenuUnit(10), h / 2, Color(100, 255, 100), TEXT_ALIGN_RIGHT, TEXT_ALIGN_CENTER)
-                    end
+                    local accessText, accessColor = GetAccessState(id, info, isSelected)
+                    draw.SimpleText(accessText, TRAITOR_MENU_FONT, w - MenuUnit(10), h / 2, accessColor, TEXT_ALIGN_RIGHT, TEXT_ALIGN_CENTER)
                 end
                 btn.OnCursorEntered = function()
                     UpdatePreview(id, true)
                 end
                 btn.DoClick = function()
+                    if TryBuy(id, info) then return end
+
                     local oldSkillset = state.loadout.skillset
                     local oldCost = config.skillsets[oldSkillset] and config.skillsets[oldSkillset].cost or 0
                     local costDiff = info.cost - oldCost
@@ -1126,7 +1301,8 @@ local function OpenRoleEditor(parentPanel, roleId, returnPanel)
             btn:SetText("")
             btn.Paint = function(s, w, h)
                 local isSelected = table.HasValue(state.loadout.weapons, id)
-                local isDisabled = not isSelected and HasWeaponConflict(config, state.loadout.weapons, id)
+                local isUnlocked = IsUnlockedItem(id, info)
+                local isDisabled = isUnlocked and not isSelected and HasWeaponConflict(config, state.loadout.weapons, id)
                 local bgColor = isSelected and Color(100, 100, 100, 150) or Color(30, 30, 30, 150)
                 if s:IsHovered() and not isDisabled then
                     bgColor = Color(150, 150, 150, 150)
@@ -1138,14 +1314,15 @@ local function OpenRoleEditor(parentPanel, roleId, returnPanel)
                 if isDisabled then
                     draw.RoundedBox(0, 0, 0, w, h, Color(0, 0, 0, 190))
                 end
-                if isSelected then
-                    draw.SimpleText("EQUIPPED", TRAITOR_MENU_FONT, w - MenuUnit(10), h / 2, Color(100, 255, 100), TEXT_ALIGN_RIGHT, TEXT_ALIGN_CENTER)
-                end
+                local accessText, accessColor = GetAccessState(id, info, isSelected)
+                draw.SimpleText(accessText, TRAITOR_MENU_FONT, w - MenuUnit(10), h / 2, accessColor, TEXT_ALIGN_RIGHT, TEXT_ALIGN_CENTER)
             end
             btn.OnCursorEntered = function()
                 UpdatePreview(id, false)
             end
             btn.DoClick = function()
+                if TryBuy(id, info) then return end
+
                 local isDisabled = not table.HasValue(state.loadout.weapons, id) and HasWeaponConflict(config, state.loadout.weapons, id)
                 if isDisabled then
                     surface.PlaySound("buttons/button10.wav")
@@ -1191,9 +1368,8 @@ local function OpenRoleEditor(parentPanel, roleId, returnPanel)
                             surface.SetDrawColor(200, 200, 200, 40)
                             surface.DrawOutlinedRect(0, 0, w, h)
                             draw.SimpleText("↳ " .. addonInfo.name .. " (" .. addonInfo.cost .. " pts)", TRAITOR_MENU_FONT, MenuUnit(10), h / 2, Color(235, 235, 235), TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
-                            if isSelected then
-                                draw.SimpleText("EQUIPPED", TRAITOR_MENU_FONT, w - MenuUnit(10), h / 2, Color(100, 255, 100), TEXT_ALIGN_RIGHT, TEXT_ALIGN_CENTER)
-                            end
+                            local accessText, accessColor = GetAccessState(addonId, addonInfo, isSelected)
+                            draw.SimpleText(accessText, TRAITOR_MENU_FONT, w - MenuUnit(10), h / 2, accessColor, TEXT_ALIGN_RIGHT, TEXT_ALIGN_CENTER)
                         end
                         addonBtn.OnCursorEntered = function()
                             UpdatePreview(addonId, false)
@@ -1203,6 +1379,7 @@ local function OpenRoleEditor(parentPanel, roleId, returnPanel)
                                 surface.PlaySound("buttons/button10.wav")
                                 return
                             end
+                            if TryBuy(addonId, addonInfo) then return end
                             if table.HasValue(state.loadout.weapons, addonId) then
                                 table.RemoveByValue(state.loadout.weapons, addonId)
                             else
@@ -1247,6 +1424,23 @@ local function OpenRoleEditor(parentPanel, roleId, returnPanel)
     end
 
     UpdateUI()
+
+    local unlockHook = "ZCity_TraitorLoadout_" .. roleId
+    hook.Add("HG_CrimXPUnlocksUpdated", unlockHook, function()
+        if not IsValid(editorPanel) then
+            hook.Remove("HG_CrimXPUnlocksUpdated", unlockHook)
+            return
+        end
+
+        state.loadout = SanitizeLoadout(config, state.loadout, true)
+        SaveLoadout(roleId)
+        if UpdateUI then UpdateUI() end
+    end)
+
+    editorPanel.OnRemove = function()
+        hook.Remove("HG_CrimXPUnlocksUpdated", unlockHook)
+        if IsValid(earlyUnlockFrame) then earlyUnlockFrame:Remove() end
+    end
 end
 
 function hg.DrawLoadoutMenu(parentPanel)

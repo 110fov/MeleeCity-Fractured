@@ -87,6 +87,7 @@ end
 
 if CLIENT then
 	local hg_old_notificate = ConVarExists("hg_old_notificate") and GetConVar("hg_old_notificate") or CreateConVar("hg_old_notificate",0,{FCVAR_USERINFO,FCVAR_ARCHIVE},"Toggle old notifications (chatprints)",0,1)
+	local hg_newthoughts = ConVarExists("hg_newthoughts") and GetConVar("hg_newthoughts") or CreateClientConVar("hg_newthoughts", "0", true, true, "Toggle new stacked injury thoughts", 0, 1)
 
 	surface.CreateFont("BerserkFont", {
 		font = "Who asks Satan",
@@ -122,7 +123,21 @@ if CLIENT then
 		outline = false,
 	})
 
+	surface.CreateFont("ThoughtFont", {
+		font = "BudgetLabel",
+		extended = true,
+		size = ScreenScale(11),
+		weight = 0,
+		blursize = 0,
+		scanlines = 0,
+		antialias = true,
+		strikeout = false,
+		shadow = false,
+		outline = false,
+	})
+
 	hg.notifications = hg.notifications or {}
+	hg.thoughts = hg.thoughts or {}
 	hg.notificationFont = "HuyFont"
 
 	hook.Add("Player_Death","removeNotifications",function(ply)
@@ -130,6 +145,7 @@ if CLIENT then
 
 		//hg.currentNotification = nil
 		hg.notifications = {}
+		hg.thoughts = {}
 	end)
 
 	hook.Add("Player Spawn","removeNotificationsa",function(ply)
@@ -137,6 +153,7 @@ if CLIENT then
 
 		hg.currentNotification = nil
 		hg.notifications = {}
+		hg.thoughts = {}
 	end)
 
 	hook.Add("HG_OnOtrub","removeNotificationsb",function(ply)
@@ -144,6 +161,7 @@ if CLIENT then
 
 		//hg.currentNotification = nil
 		hg.notifications = {}
+		hg.thoughts = {}
 	end)
 
 	local defaultShowTimer = 3
@@ -178,6 +196,20 @@ if CLIENT then
 		table.insert(hg.notifications, {msg, (showTimer or defaultShowTimer), clr or Color(255, 255, 255, 255)})
 	end
 
+	local function CreateThought(msg, clr)
+		if not hg_newthoughts:GetBool() then return end
+		if lply:IsBerserk() then return end
+
+		table.insert(hg.thoughts, {msg, CurTime(), clr or Color(255, 255, 255, 255)})
+
+		while #hg.thoughts > 3 do
+			local tbl = hg.thoughts[1]
+			local oldClr = tbl[3]
+			chat.AddText(Color(oldClr.r, oldClr.g, oldClr.b, 255), tbl[1] .. "\n")
+			table.remove(hg.thoughts, 1)
+		end
+	end
+
 	local PLAYER = FindMetaTable("Player")
 
 	function PLAYER:Notify(...)
@@ -186,6 +218,10 @@ if CLIENT then
 
 	function PLAYER:NotifyBerserk(...)
 		return CreateNotificationBerserk(...)
+	end
+
+	function PLAYER:Thought(...)
+		return CreateThought(...)
 	end
 
 	net.Receive("HGNotificate",function()
@@ -206,8 +242,18 @@ if CLIENT then
 		CreateNotificationBerserk(msg, showtime, clr)
 	end)
 
+	net.Receive("HGThought",function()
+		local msg = net.ReadString()
+		local clr = net.ReadColor()
+
+		if msg == "" then return end
+
+		CreateThought(msg, clr)
+	end)
+
 	hg.CreateNotification = CreateNotification
 	hg.CreateNotificationBerserk = CreateNotificationBerserk
+	hg.CreateThought = CreateThought
 	local colred = Color(255,0,0)
 
 	local time_spent = CurTime()
@@ -312,6 +358,7 @@ if CLIENT then
 				end
 
 				local font = hg.notificationFont
+				local corrupt = hg.FontCorruption and hg.FontCorruption.ShouldCorrupt(org)
 
 				surface.SetFont(font)
 				local txtw, txth = surface.GetTextSize(last_message or txt)
@@ -357,14 +404,28 @@ if CLIENT then
 
 					render.PopFilterMag()
 				elseif lply.PlayerClassName == "furry" then
-					local x, y = ScrW() / 2 - txtw / 2 + math.Rand(0, org.pain > 10 and org.pain / 10 or 0) + math.Rand(0, (255 - clr.g) / 255 * 2), ScrH() - ScrH() / 6 + math.Rand(0, org.pain > 10 and org.pain / 10 or 0) + math.Rand(0, (255 - clr.g) / 255 * 2)
+					local jitterX = math.Rand(0, org.pain > 10 and org.pain / 10 or 0) + math.Rand(0, (255 - clr.g) / 255 * 2)
+					local jitterY = math.Rand(0, org.pain > 10 and org.pain / 10 or 0) + math.Rand(0, (255 - clr.g) / 255 * 2)
 
-					draw.SimpleText(last_message or txt, "ZB_ProotOSMedium", x + 2, y + 2, ColorAlpha(color_black, col.a), TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
-					draw.SimpleText(last_message or txt, "ZB_ProotOSMedium", x, y, ColorAlpha(bluewhite, col.a), TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+					if corrupt then
+						hg.FontCorruption.DrawText(last_message or txt, "ZB_ProotOSMedium", ScrW() / 2 + jitterX, ScrH() - ScrH() / 6 + jitterY, ColorAlpha(bluewhite, col.a), TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER, org, ScreenScale(9), color_black, 2)
+					else
+						local x, y = ScrW() / 2 - txtw / 2 + jitterX, ScrH() - ScrH() / 6 + jitterY
+
+						draw.SimpleText(last_message or txt, "ZB_ProotOSMedium", x + 2, y + 2, ColorAlpha(color_black, col.a), TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+						draw.SimpleText(last_message or txt, "ZB_ProotOSMedium", x, y, ColorAlpha(bluewhite, col.a), TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER)
+					end
 				else
-					local x, y = ScrW() / 2 - txtw / 2 + math.Rand(0, org.pain > 10 and org.pain / 10 or 0) + math.Rand(0, (255 - clr.g) / 255 * 2), ScrH() - ScrH() / 6 + math.Rand(0, org.pain > 10 and org.pain / 10 or 0) + math.Rand(0, (255 - clr.g) / 255 * 2)
+					local jitterX = math.Rand(0, org.pain > 10 and org.pain / 10 or 0) + math.Rand(0, (255 - clr.g) / 255 * 2)
+					local jitterY = math.Rand(0, org.pain > 10 and org.pain / 10 or 0) + math.Rand(0, (255 - clr.g) / 255 * 2)
 
-					draw.SimpleTextOutlined(last_message or txt, font, x, y, col, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER, 1.5, colBrown)
+					if corrupt then
+						hg.FontCorruption.DrawText(last_message or txt, font, ScrW() / 2 + jitterX, ScrH() - ScrH() / 6 + jitterY, col, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER, org, ScreenScale(9), colBrown, 1.5)
+					else
+						local x, y = ScrW() / 2 - txtw / 2 + jitterX, ScrH() - ScrH() / 6 + jitterY
+
+						draw.SimpleTextOutlined(last_message or txt, font, x, y, col, TEXT_ALIGN_LEFT, TEXT_ALIGN_CENTER, 1.5, colBrown)
+					end
 				end
 			else
 				local tbl = hg.currentNotification
@@ -383,7 +444,45 @@ if CLIENT then
 		end
 	end
 
+	local thoughtBrown = Color(35, 23, 16, 255)
+	local function ThoughtsDraw()
+		time_spent = CurTime()
+		lply = LocalPlayer()
+		if not hg_newthoughts:GetBool() then return end
+		if not IsValid(lply) then hg.thoughts = {} return end
+		if not lply:Alive() or lply:IsBerserk() then hg.thoughts = {} return end
+		if #hg.thoughts == 0 then return end
+
+		local org = lply.organism
+		local corrupt = hg.FontCorruption and hg.FontCorruption.ShouldCorrupt and hg.FontCorruption.ShouldCorrupt(org)
+
+		for i = #hg.thoughts, 1, -1 do
+			local tbl = hg.thoughts[i]
+			if time_spent - tbl[2] >= 4.5 then
+				table.remove(hg.thoughts, i)
+			end
+		end
+
+		local count = 0
+		for _, tbl in ipairs(hg.thoughts) do
+			local msg, time, clr = tbl[1], tbl[2], tbl[3]
+			local fade = math.Clamp((4.5 - (time_spent - time)) / 0.6, 0, 1)
+			local drawClr = Color(clr.r, clr.g, clr.b, clr.a * fade)
+			local outlineClr = Color(thoughtBrown.r, thoughtBrown.g, thoughtBrown.b, thoughtBrown.a * fade)
+			local y = -count * ScreenScale(22)
+
+			if corrupt then
+				hg.FontCorruption.DrawText(msg, "ThoughtFont", ScrW() * 0.5, ScrH() * 0.71 + y, drawClr, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER, org, ScreenScale(9), outlineClr, 1)
+			else
+				draw.SimpleTextOutlined(msg, "ThoughtFont", ScrW() * 0.5, ScrH() * 0.71 + y, drawClr, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER, 1, outlineClr)
+			end
+
+			count = count + 1
+		end
+	end
+
 	hook.Add("DrawOverlay", "HGNotificationsThink", NotificationsDraw)
+	hook.Add("DrawOverlay", "HGThoughtsDraw", ThoughtsDraw)
 	hook.Add("Think", "HGNotificationsThink", NotificationsThink)
 else
 	concommand.Add("hg_notify", function(ply, cmd, args)

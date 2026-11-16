@@ -123,6 +123,12 @@ local deathButtons = {}
 local deathMouseDown = false
 local deathCursorOn = false
 
+-- How long the death fade can stay on screen. The server fades black for
+-- 1s hold + 1s fade (2s), and the organism fade runs 0.5s hold + 2s fade
+-- (2.5s). The body zoom-out stays still until this is over, so it never
+-- plays hidden behind the black screen.
+local DEATH_FADE_TIME = 2.5
+
 local xpBarLastXP = -100
 
 local function bumpXPBar()
@@ -197,7 +203,7 @@ net.Receive("hg_crimxp_death", function()
 		weapon = net.ReadString(),
 		dist = net.ReadUInt(16),
 		time = CurTime(),
-		camStart = CurTime(),
+		camStart = CurTime() + DEATH_FADE_TIME,
 		angles = IsValid(ply) and ply:EyeAngles() or Angle(0, 0, 0),
 		fov = (IsValid(ply) and ply.GetFOV and ply:GetFOV()) or 70,
 	}
@@ -569,6 +575,8 @@ local function BuildDeathCam()
 	local rag = GetDeathRagdoll(ply)
 	local focus = IsValid(rag) and rag:WorldSpaceCenter() or (ply:GetPos() + Vector(0, 0, 32))
 
+	-- camStart is delayed past the death fade, so the camera holds still while
+	-- the screen is black and only starts easing out once it is visible again
 	local t = math.Clamp((CurTime() - deathScreen.camStart) / 4, 0, 1)
 	local ease = 1 - (1 - t) * (1 - t) * (1 - t)
 

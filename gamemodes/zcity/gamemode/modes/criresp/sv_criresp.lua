@@ -523,9 +523,9 @@ local function GetBonePos(body, boneName)
 end
 
 --;; ÑÐ½Ð°Ð¹Ð¿ÐµÑ€Ð° Ð·Ð¾Ð²ÑƒÑ‚ Ð´Ð¶Ð¾Ð½ Ð·ÑÐ¸Ñ‚Ð¸, Ð¾Ð½ Ð»ÑŽÐ±Ð¸Ñ‚ ÑÑ‚Ñ€ÐµÐ»ÑÑ‚ÑŒ Ð² Ð¿Ð»Ð¾Ñ…Ð¸Ñ… Ð»ÑŽÐ´ÐµÐ¹, Ð¾Ð½ Ð¿ÐµÑ€ÐµÐ¶Ð¸Ð» Ð¼Ð½Ð¾Ð³Ð¾Ðµ Ð½Ð¾ Ñ‚ÐµÐ¿ÐµÑ€ÑŒ Ð¾Ð½ ÑÑ‚Ð¾Ð¸Ñ‚ Ð½Ð° ÑÑ‚Ñ€Ð°Ð¶Ðµ Ð¿Ð¾Ñ€ÑÐ´ÐºÐ° ÑÐ»Ð°Ð²Ð½Ð¾Ð³Ð¾ Ð³Ð¾Ñ€Ð¾Ð´ÐºÐ° Ð·ÐµÐ´, Ð·Ð½Ð°Ð¹Ñ‚Ðµ ÐµÑÐ»Ð¸ Ð²Ñ‹ Ð¿Ð¾Ð³Ð¸Ð±Ð»Ð¸ Ð²Ñ‹Ð¹Ð´Ñ Ð¸Ð· Ð·Ð´Ð°Ð½Ð¸Ðµ Ñ‚Ð¾ ÑÑ‚Ð¾ Ð±Ñ‹Ð» Ð¸Ð¼ÐµÐ½Ð½Ð¾ Ð¾Ð½.
-local function SniperShot(ply)
+local function SniperShot(ply, forceHead)
 	local body = GetBody(ply)
-	local headshot = math.random() <= 0.3
+	local headshot = forceHead or math.random() <= 0.3
 
 	local target = GetBonePos(body, headshot and "ValveBiped.Bip01_Head1" or "ValveBiped.Bip01_Spine2")
 		or body:WorldSpaceCenter()
@@ -571,6 +571,9 @@ local function SniperShot(ply)
 
 	sound.Play("mosin/mosin_dist.wav", src, 120, math.random(95, 105))
 end
+
+-- Also used by the ULX funban feature (hg_funbantest) to decapitate with the Siege sniper.
+zb.SniperShot = SniperShot
 
 local function SniperZoneThink()
 	if #sniperZones == 0 then return end

@@ -62,21 +62,17 @@ local function ParseLoadoutString(dataStr)
 	return loadout
 end
 
-local LegacyTraitorLoadout = {
+local DefaultTraitorLoadout = {
 	skillset = "none",
 	weapons = {
-		"weapon_p22",
-		"weapon_p22_silencer",
-		"weapon_buck200knife",
-		"weapon_hg_rgd_tpik",
-		"weapon_adrenaline",
-		"weapon_hg_shuriken",
-		"weapon_hg_smokenade_tpik",
-		"weapon_traitor_ied",
-		"weapon_traitor_poison1",
-		"weapon_traitor_suit",
-		"weapon_hg_jam",
-		"weapon_walkie_talkie"
+		"weapon_mp-80",
+		"weapon_buck200knife"
+	}
+}
+
+local DefaultHeroLoadout = {
+	weapons = {
+		"weapon_px4beretta"
 	}
 }
 
@@ -86,10 +82,17 @@ local TraitorSkillsetSubRoles = {
 	["chemist"] = "traitor_chemist",
 }
 
+local function SanitizePlayerLoadout(ply, roleId, loadout)
+	if CRIMXP and CRIMXP.SanitizeForPlayer then return CRIMXP.SanitizeForPlayer(ply, roleId, loadout) end
+	if CRIMXP and CRIMXP.SanitizeLoadout then return CRIMXP.SanitizeLoadout(roleId, loadout) end
+	return {weapons = {}}
+end
+
 local function ApplyTraitorLoadout(ply)
-	local loadout = ParseLoadoutString(ply:GetInfo("hmcd_traitor_loadout"))
-	local weaponsEmpty = not istable(loadout.weapons) or #loadout.weapons == 0
-	if (not loadout.skillset and weaponsEmpty) or (loadout.skillset == "none" and weaponsEmpty) then loadout = LegacyTraitorLoadout end
+	local loadout = SanitizePlayerLoadout(ply, "traitor", ParseLoadoutString(ply:GetInfo("hmcd_traitor_loadout")))
+	if loadout.skillset == "none" and #loadout.weapons == 0 then
+		loadout = SanitizePlayerLoadout(ply, "traitor", DefaultTraitorLoadout)
+	end
 
 	local skillset = loadout.skillset or "none"
 	local weaponsList = loadout.weapons or {}
@@ -146,7 +149,7 @@ local function ApplyTraitorLoadout(ply)
 end
 
 local function ApplyHeroLoadout(ply)
-	local loadout = ParseLoadoutString(ply:GetInfo("hmcd_hero_loadout"))
+	local loadout = SanitizePlayerLoadout(ply, "hero", ParseLoadoutString(ply:GetInfo("hmcd_hero_loadout")))
 	local weaponsList = istable(loadout.weapons) and loadout.weapons or {}
 	local selectedWeapon = "weapon_px4beretta"
 
@@ -155,6 +158,12 @@ local function ApplyHeroLoadout(ply)
 			selectedWeapon = weaponId
 			break
 		end
+	end
+
+	if not HeroWeaponData[selectedWeapon] then
+		loadout = SanitizePlayerLoadout(ply, "hero", DefaultHeroLoadout)
+		weaponsList = loadout.weapons or {}
+		selectedWeapon = "weapon_px4beretta"
 	end
 
 	ply.organism.recoilmul = 1
@@ -241,7 +250,7 @@ MODE.SubRoles = {
 	["traitor_custom"] = {
 		Name = "Loadout",
 		Description = [[You are the custom traitor.
-Your abilities and loadout are based on your selected preset or loadout.]],
+Your abilities and loadout are based on your unlocked items and selected skillset.]],
 		Objective = "Use your loadout to murder everyone here.",
 		SpawnFunction = function(ply)
 			ApplyTraitorLoadout(ply)
@@ -535,12 +544,6 @@ MODE.RoleChooseRoundTypes = {
 		TraitorDefaultRole = "traitor_custom",
 		Traitor = {
 			["traitor_custom"] = true,
-			["traitor_default"] = true,
-			["traitor_infiltrator"] = true,
-			["traitor_chemist"] = true,
-			["traitor_assasin"] = true,
-			--; ОБЪЕДЕНИТЬ ХИМИКА И ДИВЕРСАНТА!!! наверное
-			-- ["traitor_demoman"] = true,
 		},
 		Professions = {
 			["doctor"] = {
@@ -564,11 +567,6 @@ MODE.RoleChooseRoundTypes = {
 		TraitorDefaultRole = "traitor_custom",
 		Traitor = {
 			["traitor_custom"] = true,
-			["traitor_default_soe"] = true,
-			["traitor_infiltrator_soe"] = true,
-			-- ["traitor_chemist_soe"] = true,
-			["traitor_assasin_soe"] = true,
-			-- ["traitor_demoman_soe"] = true,
 		},
 		Professions = {
 			["doctor"] = {

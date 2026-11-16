@@ -1279,6 +1279,10 @@ function SWEP:CustomThink()
                 end
 
                 self:PrimaryAttackAdd(ent, trace)
+
+                if hg.Hitstop and dmg > 0 then
+                    hg.Hitstop(owner, ent, self.HitstopPrimary or 0.5, trace.HitPos)
+                end
             end
 
             ::meleeskip1::
@@ -1377,6 +1381,10 @@ function SWEP:CustomThink()
                 end
 
                 self:SecondaryAttackAdd(ent, trace)
+
+                if hg.Hitstop and dmg > 0 then
+                    hg.Hitstop(owner, ent, self.HitstopSecondary or 0.5, trace.HitPos)
+                end
             end
 
             ::meleeskip2::
@@ -1408,6 +1416,9 @@ end
 
 SWEP.AttackTimeLength = 0.15
 SWEP.Attack2TimeLength = 0.1
+
+SWEP.HitstopPrimary = 0.5
+SWEP.HitstopSecondary = 0.5
 
 SWEP.AttackRads = 45
 SWEP.AttackRads2 = 65

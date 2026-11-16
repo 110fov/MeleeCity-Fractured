@@ -89,6 +89,13 @@ MODE.LootTable = {
 		{3.5,"weapon_m1911"},
 		{3,"weapon_m9beretta"},
 		{2,"weapon_fn45"},
+
+		{16,"ent_ammo_.45rubber"},
+		{9,"ent_ammo_9x18mm"},
+		{8,"ent_ammo_.22longrifle"},
+		{5,"ent_ammo_9x19mmparabellum"},
+		{5,"ent_ammo_.38special"},
+		{4,"ent_ammo_.45acp"},
 	}},
 	{6, {
 		{9,"weapon_hk_usp"},
@@ -102,6 +109,10 @@ MODE.LootTable = {
 		{5,"weapon_doublebarrel_short"},
 		{5,"weapon_doublebarrel"},
 		{4, "weapon_flintlock"},
+
+		{10,"ent_ammo_9x19mmparabellum"},
+		{7,"ent_ammo_.50actionexpress"},
+		{6,"ent_ammo_12/70gauge"},
 	}},
 	{4,{
 		{5,"ent_armor_vest3"},
@@ -131,6 +142,14 @@ MODE.LootTable = {
 		{1,"weapon_musket"},
 		{1,"weapon_vpo136"},
 		{1,"weapon_sr25"},
+
+		{5,"ent_ammo_12/70gauge"},
+		{4,"ent_ammo_5.56x45mm"},
+		{4,"ent_ammo_7.62x39mm"},
+		{4,"ent_ammo_7.62x51mm"},
+		{4,"ent_ammo_9x19mmparabellum"},
+		{3,"ent_ammo_4.6x30mm"},
+		{1.5,"ent_ammo_5.45x39mm"},
 	}},
 }
 

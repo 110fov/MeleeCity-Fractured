@@ -67,15 +67,23 @@ net.Receive("HG_CrimXPAdminSaveResult", function()
 	chat.AddText(ok and Color(80, 200, 80) or Color(255, 80, 80), "[XP] " .. (message or ""))
 end)
 
+net.Receive("HG_CrimXPAdminKarma", function()
+	local karma = util.JSONToTable(net.ReadString()) or {}
+
+	if IsValid(statsFrame) and statsFrame.ApplyKarma then
+		statsFrame:ApplyKarma(karma)
+	end
+end)
+
 function CRIMXP.OpenAdminStats()
 	if IsValid(statsFrame) then return end
 	if not IsValid(LocalPlayer()) or not LocalPlayer():IsAdmin() then return end
 
 	local frame = vgui.Create("ZFrame")
 	statsFrame = frame
-	frame:SetSize(920, 580)
+	frame:SetSize(960, 580)
 	frame:Center()
-	frame:SetTitle("Criminal Records - Admin")
+	frame:SetTitle("Database - Admin")
 	frame:MakePopup()
 
 	frame.OnClose = function()
@@ -100,17 +108,20 @@ function CRIMXP.OpenAdminStats()
 
 	local leftPanel = vgui.Create("DPanel", frame)
 	leftPanel:Dock(LEFT)
-	leftPanel:SetWide(430)
+	leftPanel:SetWide(470)
 	leftPanel:DockMargin(8, 0, 4, 8)
 	StylePanel(leftPanel)
+
+	local KARMA_COLUMN = 5
 
 	local list = vgui.Create("DListView", leftPanel)
 	list:Dock(FILL)
 	list:SetMultiSelect(false)
-	list:AddColumn("Player"):SetWidth(150)
-	list:AddColumn("Level"):SetWidth(50)
-	list:AddColumn("XP"):SetWidth(75)
-	list:AddColumn("Fracture$"):SetWidth(80)
+	list:AddColumn("Player"):SetWidth(140)
+	list:AddColumn("Level"):SetWidth(45)
+	list:AddColumn("XP"):SetWidth(65)
+	list:AddColumn("Fracture$"):SetWidth(75)
+	list:AddColumn("Karma"):SetWidth(55)
 	list:AddColumn("Status"):SetWidth(62)
 
 	local rightPanel = vgui.Create("DScrollPanel", frame)
@@ -136,7 +147,7 @@ function CRIMXP.OpenAdminStats()
 
 		local entry = vgui.Create("DTextEntry", row)
 		entry:Dock(FILL)
-		entry:SetText(tostring(value or 0))
+		entry:SetText(value == nil and "" or tostring(value))
 		entry:SetFont("ZB_QM_Item")
 
 		entries[key] = entry
@@ -166,6 +177,7 @@ function CRIMXP.OpenAdminStats()
 		hint:SetText("Changing the Level field sets total XP to that level's threshold. Changing XP only keeps the current level.")
 		hint:SetTextColor(COL_DIM)
 
+		AddEntry(rightPanel, "Karma", "karma", row.karma ~= nil and math.Round(tonumber(row.karma) or 0) or nil)
 		AddEntry(rightPanel, "Level", "level", level)
 		AddEntry(rightPanel, "Total XP", "xp", row.xp)
 		AddEntry(rightPanel, "Fracture$", "fracture", row.fracture)
@@ -177,7 +189,7 @@ function CRIMXP.OpenAdminStats()
 		saveBtn:Dock(TOP)
 		saveBtn:SetTall(38)
 		saveBtn:DockMargin(0, 10, 0, 0)
-		saveBtn:SetText("Save Criminal Record")
+		saveBtn:SetText("Save Record")
 		StyleButton(saveBtn, COL_GREEN, COL_GREEN_H)
 
 		saveBtn.DoClick = function()
@@ -185,7 +197,10 @@ function CRIMXP.OpenAdminStats()
 
 			local data = {name = selectedRow.name}
 			for key, entry in pairs(entries) do
-				data[key] = entry:GetText()
+				local text = entry:GetText()
+				-- leave a field out when it is blank (karma is unknown until its
+				-- MySQL lookup returns), so saving never overwrites it with 0
+				if text ~= "" then data[key] = text end
 			end
 
 			net.Start("HG_CrimXPAdminSave")
@@ -205,8 +220,27 @@ function CRIMXP.OpenAdminStats()
 
 			if needle == "" or name:lower():find(needle, 1, true) or steamid:find(needle, 1, true) then
 				local level = CRIMXP.LevelForXP(tonumber(row.xp) or 0)
-				local line = list:AddLine(name, tostring(level), tostring(row.xp or 0), tostring(row.fracture or 0), row.active and "Online" or "Offline")
+				local karma = row.karma ~= nil and tostring(math.Round(tonumber(row.karma) or 0)) or "-"
+				local line = list:AddLine(name, tostring(level), tostring(row.xp or 0), tostring(row.fracture or 0), karma, row.active and "Online" or "Offline")
 				line.RowData = row
+			end
+		end
+	end
+
+	-- offline karma comes from MySQL a moment later than the row list
+	function frame:ApplyKarma(karmaByID)
+		for i = 1, list:GetRowCount() do
+			local line = list:GetLine(i)
+			local row = IsValid(line) and line.RowData or nil
+			local value = row and karmaByID[tostring(row.steamid)] or nil
+
+			if value ~= nil then
+				row.karma = value
+				line:SetColumnText(KARMA_COLUMN, tostring(math.Round(tonumber(value) or 0)))
+
+				if selectedRow == row and entries.karma and entries.karma:GetText() == "" then
+					entries.karma:SetText(tostring(math.Round(tonumber(value) or 0)))
+				end
 			end
 		end
 	end

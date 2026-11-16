@@ -370,7 +370,12 @@ local function CreateRadialMenu(options_arg, bAutoClose)
 					txt = hg.get_status_message(ply)
 					math.randomseed(os.time())
 				end
-				draw.DrawText(txt, "HomigradFont", scrW / 2 + math.sin(a) * r * 0.75, scrH / 2 + math.cos(a) * r * 0.75, colWhite, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+				local org = IsValid(lply) and lply.organism
+				if paining and hg.FontCorruption and hg.FontCorruption.ShouldCorrupt(org) then
+					hg.FontCorruption.DrawText(txt, "HomigradFont", scrW / 2 + math.sin(a) * r * 0.75, scrH / 2 + math.cos(a) * r * 0.75, colWhite, TEXT_ALIGN_CENTER, TEXT_ALIGN_TOP, org, ScreenScale(10), color_black, 1.5)
+				else
+					draw.DrawText(txt, "HomigradFont", scrW / 2 + math.sin(a) * r * 0.75, scrH / 2 + math.cos(a) * r * 0.75, colWhite, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+				end
 			end
 		end
 		if !paining then

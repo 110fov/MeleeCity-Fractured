@@ -269,6 +269,12 @@ local gradient_d = Material("vgui/gradient-d")
 local gray = Color(255, 255, 255, 100)
 local black = Color(0, 0, 0, 200)
 
+local function ChatFontSize()
+	local size = GetConVar("zchat_fontsize")
+
+	return ScreenScale(size and size:GetFloat() or 7)
+end
+
 function PANEL:Paint(w, h)
 	surface.SetDrawColor(247, 67, 67, 100 + math.sin(CurTime()) * 30)
 	surface.SetMaterial(gradient_d)
@@ -395,10 +401,17 @@ function PANEL:AddLine(elements)
 		end
 	end
 
+	local markup = table.concat(buffer)
+	local ply = LocalPlayer()
+
+	if hg.FontCorruption and IsValid(ply) then
+		markup = hg.FontCorruption.CorruptMarkup(markup, ply.organism, ChatFontSize())
+	end
+
 	local panel = self.history:Add("zChatMessage")
 	panel:Dock(TOP)
 	panel:InvalidateParent(true)
-	panel:SetMarkup(table.concat(buffer))
+	panel:SetMarkup(markup)
 
 	if (#self.entries >= 100) then
 		local oldPanel = table.remove(self.entries, 1)

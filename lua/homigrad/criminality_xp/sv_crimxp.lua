@@ -11,7 +11,8 @@ sql.Query([[CREATE TABLE IF NOT EXISTS hg_crimxp (
 	kills INTEGER NOT NULL DEFAULT 0,
 	deaths INTEGER NOT NULL DEFAULT 0,
 	beststreak INTEGER NOT NULL DEFAULT 0,
-	fracture INTEGER NOT NULL DEFAULT 0
+	fracture INTEGER NOT NULL DEFAULT 0,
+	rewardedlevel INTEGER NOT NULL DEFAULT 0
 );]])
 
 local columns = sql.Query("PRAGMA table_info(hg_crimxp);")
@@ -28,7 +29,19 @@ if columns then
 	if not has.name then
 		sql.Query("ALTER TABLE hg_crimxp ADD COLUMN name TEXT DEFAULT '';")
 	end
+
+	if not has.rewardedlevel then
+		sql.Query("ALTER TABLE hg_crimxp ADD COLUMN rewardedlevel INTEGER NOT NULL DEFAULT -1;")
+	end
 end
+
+sql.Query([[CREATE TABLE IF NOT EXISTS hg_crimxp_unlocks (
+	steamid VARCHAR(32) NOT NULL,
+	item VARCHAR(64) NOT NULL,
+	PRIMARY KEY (steamid, item)
+);]])
+
+CRIMXP.Owned = CRIMXP.Owned or {}
 
 CRIMXP.Data = CRIMXP.Data or {}
 
@@ -54,7 +67,7 @@ local function WeaponNameOf(wep)
 end
 
 local function blankData()
-	return {xp = 0, kills = 0, deaths = 0, streak = 0, beststreak = 0, fracture = 0}
+	return {xp = 0, kills = 0, deaths = 0, streak = 0, beststreak = 0, fracture = 0, rewardedlevel = 0}
 end
 
 local function LoadRow(ply)
@@ -62,7 +75,7 @@ local function LoadRow(ply)
 
 	if ply:IsBot() then return blankData() end
 
-	local row = sql.QueryRow("SELECT xp, kills, deaths, beststreak, fracture FROM hg_crimxp WHERE steamid = " .. sql.SQLStr(key) .. ";")
+	local row = sql.QueryRow("SELECT xp, kills, deaths, beststreak, fracture, rewardedlevel FROM hg_crimxp WHERE steamid = " .. sql.SQLStr(key) .. ";")
 	if row then
 		return {
 			xp = math.max(tonumber(row.xp) or 0, 0),
@@ -71,10 +84,11 @@ local function LoadRow(ply)
 			streak = 0,
 			beststreak = math.max(tonumber(row.beststreak) or 0, 0),
 			fracture = math.max(tonumber(row.fracture) or 0, 0),
+			rewardedlevel = tonumber(row.rewardedlevel) or -1,
 		}
 	end
 
-	sql.Query("INSERT OR IGNORE INTO hg_crimxp (steamid, name, xp, kills, deaths, beststreak, fracture) VALUES (" .. sql.SQLStr(key) .. ", " .. sql.SQLStr(NameOf(ply)) .. ", 0, 0, 0, 0, 0);")
+	sql.Query("INSERT OR IGNORE INTO hg_crimxp (steamid, name, xp, kills, deaths, beststreak, fracture, rewardedlevel) VALUES (" .. sql.SQLStr(key) .. ", " .. sql.SQLStr(NameOf(ply)) .. ", 0, 0, 0, 0, 0, 0);")
 	return blankData()
 end
 
@@ -84,7 +98,50 @@ local function SaveRow(ply)
 	local data = CRIMXP.Data[key]
 	if not data then return end
 
-	sql.Query("UPDATE hg_crimxp SET name = " .. sql.SQLStr(NameOf(ply)) .. ", xp = " .. data.xp .. ", kills = " .. data.kills .. ", deaths = " .. data.deaths .. ", beststreak = " .. data.beststreak .. ", fracture = " .. (data.fracture or 0) .. " WHERE steamid = " .. sql.SQLStr(key) .. ";")
+	sql.Query("UPDATE hg_crimxp SET name = " .. sql.SQLStr(NameOf(ply)) .. ", xp = " .. data.xp .. ", kills = " .. data.kills .. ", deaths = " .. data.deaths .. ", beststreak = " .. data.beststreak .. ", fracture = " .. (data.fracture or 0) .. ", rewardedlevel = " .. (data.rewardedlevel or 0) .. " WHERE steamid = " .. sql.SQLStr(key) .. ";")
+end
+
+local function LoadOwned(ply)
+	local owned = {}
+	if ply:IsBot() then return owned end
+
+	local rows = sql.Query("SELECT item FROM hg_crimxp_unlocks WHERE steamid = " .. sql.SQLStr(keyOf(ply)) .. ";")
+	if rows then
+		for _, row in ipairs(rows) do
+			owned[row.item] = true
+		end
+	end
+
+	return owned
+end
+
+function CRIMXP.GetOwned(ply)
+	local key = keyOf(ply)
+	if not CRIMXP.Owned[key] then CRIMXP.Owned[key] = LoadOwned(ply) end
+	return CRIMXP.Owned[key]
+end
+
+function CRIMXP.PlayerOwns(ply, id)
+	local entry = CRIMXP.GetUnlockEntry(id)
+	if not entry then return false end
+	if entry.free then return true end
+
+	local owned = CRIMXP.GetOwned(ply)
+	return owned[id] == true
+end
+
+function CRIMXP.SyncUnlocks(ply)
+	if not IsValid(ply) then return end
+
+	net.Start(CRIMXP.Net.UnlockSync)
+		net.WriteTable(CRIMXP.GetOwned(ply))
+	net.Send(ply)
+end
+
+function CRIMXP.SanitizeForPlayer(ply, roleId, rawLoadout)
+	return CRIMXP.SanitizeLoadout(roleId, rawLoadout, function(id)
+		return CRIMXP.PlayerOwns(ply, id)
+	end)
 end
 
 function CRIMXP.GetData(ply)
@@ -128,26 +185,74 @@ function CRIMXP.GiveFracture(ply, amount)
 	return data.fracture
 end
 
-function CRIMXP.GiveXP(ply, amount, silent)
+function CRIMXP.ClaimPendingLevelRewards(ply, silent)
+	if not IsValid(ply) or not ply:IsPlayer() or ply:IsBot() then return 0 end
+
+	local data = CRIMXP.GetData(ply)
+	local level = CRIMXP.LevelForXP(data.xp)
+	local rewarded = tonumber(data.rewardedlevel) or 0
+
+	if rewarded < 0 then
+		data.rewardedlevel = level
+		SaveRow(ply)
+		CRIMXP.Sync(ply)
+		return 0
+	end
+
+	if level <= rewarded then return 0 end
+
+	local total = 0
+	for rewardLevel = math.max(rewarded + 1, 1), level do
+		total = total + CRIMXP.GetLevelReward(rewardLevel)
+	end
+
+	data.rewardedlevel = level
+	data.fracture = math.max((data.fracture or 0) + total, 0)
+	SaveRow(ply)
+	CRIMXP.Sync(ply)
+
+	if total > 0 then
+		hook.Run("HG_CrimXPFractureGained", ply, total, data.fracture)
+		if not silent then ply:ChatPrint("[XP] Level rewards claimed: +$" .. total) end
+	end
+
+	return total
+end
+
+function CRIMXP.GiveXP(ply, amount, silent, noRewards)
 	if not IsValid(ply) or not ply:IsPlayer() then return end
 	if not amount or amount == 0 then return end
 
 	local data = CRIMXP.GetData(ply)
 	local oldLevel = CRIMXP.LevelForXP(data.xp)
+	local rewarded = tonumber(data.rewardedlevel) or 0
 
 	data.xp = math.max(data.xp + math.floor(amount), 0)
+
+	local newLevel = CRIMXP.LevelForXP(data.xp)
+	local levelUpFracture = 0
+
+	if noRewards then
+		data.rewardedlevel = math.max(rewarded, newLevel)
+	else
+		local fromLevel = rewarded
+		if fromLevel < 0 then fromLevel = oldLevel end
+
+		if newLevel > fromLevel then
+			for rewardLevel = math.max(fromLevel + 1, 1), newLevel do
+				levelUpFracture = levelUpFracture + CRIMXP.GetLevelReward(rewardLevel)
+			end
+
+			data.rewardedlevel = newLevel
+			data.fracture = math.max((data.fracture or 0) + levelUpFracture, 0)
+		end
+	end
+
 	SaveRow(ply)
 	CRIMXP.Sync(ply)
 
-	local newLevel = CRIMXP.LevelForXP(data.xp)
-
-	local levelUpFracture = 0
-
-	if newLevel > oldLevel then
-		local levelsGained = newLevel - oldLevel
-		levelUpFracture = math.floor((Config.FractureLevelUpBonus or 0) * levelsGained)
-
-		if levelUpFracture > 0 then CRIMXP.GiveFracture(ply, levelUpFracture) end
+	if levelUpFracture > 0 then
+		hook.Run("HG_CrimXPFractureGained", ply, levelUpFracture, data.fracture)
 	end
 
 	if newLevel > oldLevel and not silent then
@@ -168,9 +273,70 @@ function CRIMXP.GiveXP(ply, amount, silent)
 	hook.Run("HG_CrimXPGained", ply, amount, data.xp)
 end
 
+function CRIMXP.PurchaseUnlock(ply, id, early)
+	if not IsValid(ply) or not ply:IsPlayer() then return false, "Invalid player." end
+	if not isstring(id) or id == "" or #id > 64 then return false, "Invalid item." end
+
+	local entry = CRIMXP.GetUnlockEntry(id)
+	if not entry then return false, "Unknown item." end
+	if entry.free then return false, "That item is already free." end
+	if CRIMXP.PlayerOwns(ply, id) then return false, "That item is already unlocked." end
+
+	local data = CRIMXP.GetData(ply)
+	local requiredLevel = tonumber(entry.requiredLevel) or 1
+	local level = CRIMXP.LevelForXP(data.xp)
+	early = early == true and level < requiredLevel
+
+	if level < requiredLevel and not early then return false, "Requires level " .. requiredLevel .. "." end
+
+	local basePrice = math.floor(tonumber(entry.price) or 0)
+	if basePrice <= 0 then return false, "Invalid unlock price." end
+
+	local price = early and basePrice * 4 or basePrice
+	if (data.fracture or 0) < price then return false, "Not enough Fracture$." end
+
+	local key = keyOf(ply)
+	local exists = sql.QueryRow("SELECT item FROM hg_crimxp_unlocks WHERE steamid = " .. sql.SQLStr(key) .. " AND item = " .. sql.SQLStr(id) .. ";")
+	if exists then
+		CRIMXP.GetOwned(ply)[id] = true
+		return false, "That item is already unlocked."
+	end
+
+	sql.Query("INSERT OR IGNORE INTO hg_crimxp_unlocks (steamid, item) VALUES (" .. sql.SQLStr(key) .. ", " .. sql.SQLStr(id) .. ");")
+
+	local saved = sql.QueryRow("SELECT item FROM hg_crimxp_unlocks WHERE steamid = " .. sql.SQLStr(key) .. " AND item = " .. sql.SQLStr(id) .. ";")
+	if not saved then return false, "Could not save that unlock." end
+
+	CRIMXP.GetOwned(ply)[id] = true
+	CRIMXP.GiveFracture(ply, -price)
+
+	return true, (early and "Unlocked early for $" or "Unlocked for $") .. price .. "."
+end
+
+net.Receive(CRIMXP.Net.Purchase, function(_, ply)
+	if not IsValid(ply) then return end
+
+	local id = net.ReadString()
+	local early = net.ReadBool()
+	local ok, message = CRIMXP.PurchaseUnlock(ply, id, early)
+	local data = CRIMXP.GetData(ply)
+
+	net.Start(CRIMXP.Net.PurchaseResult)
+		net.WriteBool(ok)
+		net.WriteString(id)
+		net.WriteString(message or "")
+		net.WriteUInt(math.Clamp(math.floor(data.fracture or 0), 0, 4294967295), 32)
+	net.Send(ply)
+
+	if ok then CRIMXP.SyncUnlocks(ply) end
+end)
+
 hook.Add("PlayerInitialSpawn", "hg_crimxp_load", function(ply)
 	CRIMXP.GetData(ply)
+	CRIMXP.ClaimPendingLevelRewards(ply)
 	CRIMXP.Sync(ply)
+	CRIMXP.GetOwned(ply)
+	CRIMXP.SyncUnlocks(ply)
 
 	if not ply:IsBot() then
 		local data = CRIMXP.GetData(ply)
@@ -193,6 +359,8 @@ hook.Add("PlayerDisconnected", "hg_crimxp_save", function(ply)
 		SaveRow(ply)
 		CRIMXP.Data[key] = nil
 	end
+
+	CRIMXP.Owned[key] = nil
 end)
 
 hook.Add("PlayerSpawn", "hg_crimxp_reset", function(ply)
@@ -534,7 +702,7 @@ concommand.Add("hg_xp_give", function(ply, cmd, args)
 		return
 	end
 
-	CRIMXP.GiveXP(target, math.floor(amount))
+	CRIMXP.GiveXP(target, math.floor(amount), true, true)
 
 	local msg = "[XP] Gave " .. amount .. " XP to " .. NameOf(target)
 	if IsValid(ply) then ply:ChatPrint(msg) end
@@ -553,6 +721,8 @@ concommand.Add("hg_xp_setxp", function(ply, cmd, args)
 
 	local data = CRIMXP.GetData(target)
 	data.xp = math.floor(amount)
+	local rewarded = tonumber(data.rewardedlevel) or 0
+	data.rewardedlevel = math.max(rewarded, CRIMXP.LevelForXP(data.xp))
 	SaveRow(target)
 	CRIMXP.Sync(target)
 	target:ChatPrint("[XP] Your XP was set to " .. data.xp .. " by an admin")
@@ -573,6 +743,7 @@ concommand.Add("hg_xp_reset", function(ply, cmd, args)
 	data.streak = 0
 	data.beststreak = 0
 	data.fracture = 0
+	data.rewardedlevel = 1
 	SaveRow(target)
 	CRIMXP.Sync(target)
 	target:ChatPrint("[XP] Your criminal record was wiped by an admin")
@@ -610,6 +781,7 @@ end)
 
 util.AddNetworkString("HG_CrimXPAdminRequest")
 util.AddNetworkString("HG_CrimXPAdminSend")
+util.AddNetworkString("HG_CrimXPAdminKarma")
 util.AddNetworkString("HG_CrimXPAdminSave")
 util.AddNetworkString("HG_CrimXPAdminSaveResult")
 
@@ -658,6 +830,7 @@ local function buildAdminRows()
 				deaths = tonumber(data.deaths) or 0,
 				beststreak = tonumber(data.beststreak) or 0,
 				fracture = tonumber(data.fracture) or 0,
+				karma = math.Round(ply.Karma or 100),
 			}
 		end
 	end
@@ -708,6 +881,65 @@ local function sendAdminRows(ply)
 			net.WriteString(util.TableToJSON(part))
 		net.Send(ply)
 	end
+
+	return rows
+end
+
+local KARMA_CHUNK = 300
+
+-- Karma lives in the MySQL zb_guilt table (see libraries/guilt/sv_guilt.lua),
+-- not in hg_crimxp, so offline karma is looked up separately and pushed to the
+-- already open menu instead of delaying the row list.
+local function sendOfflineKarma(ply, rows)
+	if not IsValid(ply) then return end
+	if not (mysql and mysql.Select and mysql.IsConnected and mysql:IsConnected()) then return end
+
+	local offline = {}
+
+	for _, row in ipairs(rows) do
+		if not row.active and isstring(row.steamid) and row.steamid:find("^%d+$") then
+			offline[#offline + 1] = row.steamid
+		end
+	end
+
+	if #offline == 0 then return end
+
+	for i = 1, #offline, KARMA_CHUNK do
+		local ids = {}
+
+		for j = i, math.min(i + KARMA_CHUNK - 1, #offline) do
+			ids[#ids + 1] = offline[j]
+		end
+
+		local query = mysql:Select("zb_guilt")
+			query:Select("steamid")
+			query:Select("value")
+			query:WhereIn("steamid", ids)
+			query:Callback(function(result)
+				if not istable(result) or not IsValid(ply) then return end
+
+				local karma = {}
+
+				for _, karmaRow in ipairs(result) do
+					local id = tostring(karmaRow.steamid or "")
+					local value = tonumber(karmaRow.value)
+
+					if id ~= "" and value then karma[id] = value end
+				end
+
+				if next(karma) == nil then return end
+
+				net.Start("HG_CrimXPAdminKarma")
+					net.WriteString(util.TableToJSON(karma))
+				net.Send(ply)
+			end)
+		query:Execute()
+	end
+end
+
+local function pushAdminRows(ply)
+	local rows = sendAdminRows(ply)
+	if rows then sendOfflineKarma(ply, rows) end
 end
 
 local function sendAdminResult(ply, ok, message)
@@ -720,7 +952,7 @@ local function sendAdminResult(ply, ok, message)
 end
 
 net.Receive("HG_CrimXPAdminRequest", function(_, ply)
-	sendAdminRows(ply)
+	pushAdminRows(ply)
 end)
 
 net.Receive("HG_CrimXPAdminSave", function(_, ply)
@@ -733,7 +965,7 @@ net.Receive("HG_CrimXPAdminSave", function(_, ply)
 	local incoming = net.ReadTable()
 
 	if not isstring(steamid) or steamid == "" or not istable(incoming) then
-		sendAdminResult(ply, false, "Invalid criminal record data")
+		sendAdminResult(ply, false, "Invalid database entry data")
 		return
 	end
 
@@ -743,11 +975,12 @@ net.Receive("HG_CrimXPAdminSave", function(_, ply)
 	if IsValid(target) then
 		current = CRIMXP.GetData(target)
 	else
-		current = sql.QueryRow("SELECT xp, kills, deaths, beststreak, fracture FROM hg_crimxp WHERE steamid = " .. sql.SQLStr(steamid) .. ";") or blankData()
+		current = sql.QueryRow("SELECT xp, kills, deaths, beststreak, fracture, rewardedlevel FROM hg_crimxp WHERE steamid = " .. sql.SQLStr(steamid) .. ";") or blankData()
 	end
 
 	local currentXP = tonumber(current.xp) or 0
 	local currentLevel = CRIMXP.LevelForXP(currentXP)
+	local currentRewarded = tonumber(current.rewardedlevel) or 0
 	local level = math.Clamp(adminNumber(incoming.level, currentLevel, true, 1), 1, CRIMXP.Config.MaxLevel)
 
 	local xp
@@ -764,11 +997,19 @@ net.Receive("HG_CrimXPAdminSave", function(_, ply)
 	local name = tostring(incoming.name or ""):sub(1, 64)
 	if name == "" then name = IsValid(target) and NameOf(target) or "Unknown" end
 
+	-- karma is optional: only present when the admin actually typed a value
+	local karma
+	if incoming.karma ~= nil and tostring(incoming.karma) ~= "" then
+		local currentKarma = IsValid(target) and tonumber(target.Karma) or 100
+		karma = math.Clamp(adminNumber(incoming.karma, currentKarma or 100, false, 0), 0, (zb and zb.MaxKarma) or 120)
+	end
+
 	xp = math.min(xp, ADMIN_MAX_STAT)
 	kills = math.min(kills, ADMIN_MAX_STAT)
 	deaths = math.min(deaths, ADMIN_MAX_STAT)
 	beststreak = math.min(beststreak, ADMIN_MAX_STAT)
 	fracture = math.min(fracture, ADMIN_MAX_STAT)
+	local rewardedlevel = math.max(currentRewarded, CRIMXP.LevelForXP(xp))
 
 	if IsValid(target) then
 		local data = CRIMXP.GetData(target)
@@ -777,18 +1018,38 @@ net.Receive("HG_CrimXPAdminSave", function(_, ply)
 		data.deaths = deaths
 		data.beststreak = beststreak
 		data.fracture = fracture
+		data.rewardedlevel = rewardedlevel
 		SaveRow(target)
 		CRIMXP.Sync(target)
 
+		if karma then
+			target.Karma = karma
+			target:SetNetVar("Karma", karma)
+
+			-- writes the zb_guilt row (MySQL) and its cache
+			if target.guilt_SetValue then
+				pcall(target.guilt_SetValue, target, karma)
+			end
+		end
+
 		target:ChatPrint("[XP] Your criminal record was updated by an admin.")
 	else
-		sql.Query("INSERT OR IGNORE INTO hg_crimxp (steamid, name, xp, kills, deaths, beststreak, fracture) VALUES (" .. sql.SQLStr(steamid) .. ", '', 0, 0, 0, 0, 0);")
-		sql.Query("UPDATE hg_crimxp SET name = " .. sql.SQLStr(name) .. ", xp = " .. xp .. ", kills = " .. kills .. ", deaths = " .. deaths .. ", beststreak = " .. beststreak .. ", fracture = " .. fracture .. " WHERE steamid = " .. sql.SQLStr(steamid) .. ";")
+		sql.Query("INSERT OR IGNORE INTO hg_crimxp (steamid, name, xp, kills, deaths, beststreak, fracture, rewardedlevel) VALUES (" .. sql.SQLStr(steamid) .. ", '', 0, 0, 0, 0, 0, 0);")
+		sql.Query("UPDATE hg_crimxp SET name = " .. sql.SQLStr(name) .. ", xp = " .. xp .. ", kills = " .. kills .. ", deaths = " .. deaths .. ", beststreak = " .. beststreak .. ", fracture = " .. fracture .. ", rewardedlevel = " .. rewardedlevel .. " WHERE steamid = " .. sql.SQLStr(steamid) .. ";")
+
+		if karma and mysql and mysql.RawQuery and mysql.IsConnected and mysql:IsConnected() then
+			local id = mysql:Escape(steamid)
+			local targetName = mysql:Escape(name)
+
+			-- zb_guilt is where karma lives; upsert so offline players without a
+			-- row yet can be edited too
+			mysql:RawQuery("INSERT INTO `zb_guilt` (`steamid`, `steam_name`, `value`) VALUES ('" .. id .. "', '" .. targetName .. "', " .. karma .. ") ON DUPLICATE KEY UPDATE `value` = " .. karma .. ";")
+		end
 	end
 
-	sendAdminResult(ply, true, "Saved criminal record for " .. name)
+	sendAdminResult(ply, true, "Saved database entry for " .. name)
 
 	timer.Simple(0.2, function()
-		if IsValid(ply) then sendAdminRows(ply) end
+		if IsValid(ply) then pushAdminRows(ply) end
 	end)
 end)
